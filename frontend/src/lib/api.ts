@@ -48,13 +48,26 @@ export async function apiRequest<T>(
     config.body = JSON.stringify(body)
   }
 
-  const response = await fetch(`${apiBaseUrl}${path}`, config)
+  let response: Response
+
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, config)
+  } catch {
+    throw new ApiError('Tidak dapat terhubung ke server. Periksa koneksi atau API base URL.', 0)
+  }
+
   const rawText = await response.text()
-  const payload = rawText ? JSON.parse(rawText) : null
+  let payload: any = null
+
+  try {
+    payload = rawText ? JSON.parse(rawText) : null
+  } catch {
+    payload = null
+  }
 
   if (!response.ok) {
     throw new ApiError(
-      payload?.message ?? 'Terjadi kesalahan saat menghubungi server.',
+      payload?.message ?? `Terjadi kesalahan saat menghubungi server (HTTP ${response.status}).`,
       response.status,
       payload?.errors ?? {},
     )

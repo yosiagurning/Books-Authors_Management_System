@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 
 import { ApiError, apiRequest } from '@/lib/api'
 import type { SummaryResponse } from '@/types'
-
-const props = defineProps<{
-  refreshToken: number
-}>()
 
 const loading = ref(false)
 const error = ref('')
@@ -44,13 +40,6 @@ async function loadSummary() {
 onMounted(() => {
   void loadSummary()
 })
-
-watch(
-  () => props.refreshToken,
-  () => {
-    void loadSummary()
-  },
-)
 </script>
 
 <template>
@@ -84,8 +73,16 @@ watch(
         </article>
       </div>
 
-      <div v-else-if="loading" class="message message-info">
-        Mengambil data dashboard dari backend...
+      <div v-else-if="loading" class="stats-grid">
+        <article class="stat-card">
+          <span>Total Authors</span>
+          <div class="skeleton mt-2 h-8 w-20" />
+        </article>
+
+        <article class="stat-card">
+          <span>Total Books</span>
+          <div class="skeleton mt-2 h-8 w-20" />
+        </article>
       </div>
     </div>
 
@@ -99,7 +96,15 @@ watch(
           <span class="badge">{{ summary?.recent_authors.length ?? 0 }} item</span>
         </div>
 
-        <ul v-if="summary?.recent_authors.length" class="list-reset mini-list">
+        <ul v-if="loading && !summary" class="list-reset mini-list">
+          <li v-for="n in 5" :key="n" class="mini-list-item">
+            <div class="skeleton h-4 w-48" />
+            <div class="skeleton mt-2 h-3 w-40" />
+            <div class="skeleton mt-2 h-3 w-56" />
+          </li>
+        </ul>
+
+        <ul v-else-if="summary?.recent_authors.length" class="list-reset mini-list">
           <li
             v-for="author in summary.recent_authors"
             :key="author.id"
@@ -127,7 +132,15 @@ watch(
           <span class="badge">{{ summary?.recent_books.length ?? 0 }} item</span>
         </div>
 
-        <ul v-if="summary?.recent_books.length" class="list-reset mini-list">
+        <ul v-if="loading && !summary" class="list-reset mini-list">
+          <li v-for="n in 5" :key="n" class="mini-list-item">
+            <div class="skeleton h-4 w-56" />
+            <div class="skeleton mt-2 h-3 w-40" />
+            <div class="skeleton mt-2 h-3 w-64" />
+          </li>
+        </ul>
+
+        <ul v-else-if="summary?.recent_books.length" class="list-reset mini-list">
           <li
             v-for="book in summary.recent_books"
             :key="book.id"

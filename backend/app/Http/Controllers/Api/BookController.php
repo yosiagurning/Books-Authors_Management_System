@@ -5,45 +5,64 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreBookRequest;
 use App\Http\Requests\UpdateBookRequest;
+use App\Models\Author;
 use App\Models\Book;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
+/**
+ * API endpoints untuk mengelola data Book.
+ */
 class BookController extends Controller
 {
+    private const UNDO_WINDOW_SECONDS = 7;
+
+    /**
+     * Menampilkan daftar book dengan filter, sorting, dan pagination.
+     */
     public function index(Request $request): JsonResponse
     {
-        $sortBy = $request->string('sort_by')->toString() ?: 'title';
-        $sortOrder = strtolower($request->string('sort_order')->toString() ?: 'asc');
-        $perPage = min(max($request->integer('per_page', 10), 1), 50);
         $allowedSorts = ['title', 'created_at', 'updated_at', 'published_date', 'author'];
 
-        if (! in_array($sortBy, $allowedSorts, true)) {
-            $sortBy = 'title';
-        }
+        $validated = $request->validate([
+            'sort_by' => ['nullable', Rule::in($allowedSorts)],
+            'sort_order' => ['nullable', Rule::in(['asc', 'desc'])],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'search' => ['nullable', 'string', 'max:120'],
+            'author_id' => ['nullable', 'integer', 'exists:authors,id'],
+            'published_from' => ['nullable', 'date'],
+            'published_to' => ['nullable', 'date', 'after_or_equal:published_from'],
+        ]);
 
-        if (! in_array($sortOrder, ['asc', 'desc'], true)) {
-            $sortOrder = 'asc';
-        }
+        $sortBy = $validated['sort_by'] ?? 'title';
+        $sortOrder = strtolower($validated['sort_order'] ?? 'asc');
+        $perPage = (int) ($validated['per_page'] ?? 10);
+        $search = isset($validated['search']) ? trim($validated['search']) : null;
+        $authorId = $validated['author_id'] ?? null;
+        $publishedFrom = $validated['published_from'] ?? null;
+        $publishedTo = $validated['published_to'] ?? null;
 
         $books = Book::query()
-            ->with('author')
+            ->with(['author:id,name,slug'])
             ->when(
-                $request->filled('search'),
-                fn ($query) => $query->where('title', 'like', '%'.$request->string('search')->trim().'%')
+                $search !== null && $search !== '',
+                fn ($query) => $query->where('title', 'like', '%'.$search.'%')
             )
             ->when(
-                $request->filled('author_id'),
-                fn ($query) => $query->where('author_id', $request->integer('author_id'))
+                $authorId !== null,
+                fn ($query) => $query->where('author_id', $authorId)
             )
             ->when(
-                $request->filled('published_from'),
-                fn ($query) => $query->whereDate('published_date', '>=', $request->input('published_from'))
+                $publishedFrom !== null,
+                fn ($query) => $query->whereDate('published_date', '>=', $publishedFrom)
             )
             ->when(
-                $request->filled('published_to'),
-                fn ($query) => $query->whereDate('published_date', '<=', $request->input('published_to'))
+                $publishedTo !== null,
+                fn ($query) => $query->whereDate('published_date', '<=', $publishedTo)
             )
             ->when($sortBy === 'author', function ($query) use ($sortOrder) {
                 $query
@@ -57,10 +76,14 @@ class BookController extends Controller
         return response()->json($books);
     }
 
+    /**
+     * Membuat book baru.
+     */
     public function store(StoreBookRequest $request): JsonResponse
     {
         $book = Book::create($this->normalizePayload($request->validated()));
-        $book->load('author');
+        $book->load('author:id,name,slug');
+        Cache::forget('dashboard.summary');
 
         return response()->json([
             'message' => 'Book berhasil dibuat.',
@@ -68,19 +91,26 @@ class BookController extends Controller
         ], 201);
     }
 
+    /**
+     * Mengambil detail book berdasarkan id.
+     */
     public function show(Book $book): JsonResponse
     {
-        $book->load('author');
+        $book->load('author:id,name,slug');
 
         return response()->json([
             'data' => $book,
         ]);
     }
 
+    /**
+     * Memperbarui data book.
+     */
     public function update(UpdateBookRequest $request, Book $book): JsonResponse
     {
         $book->update($this->normalizePayload($request->validated(), $book));
-        $book->load('author');
+        $book->load('author:id,name,slug');
+        Cache::forget('dashboard.summary');
 
         return response()->json([
             'message' => 'Book berhasil diperbarui.',
@@ -88,15 +118,64 @@ class BookController extends Controller
         ]);
     }
 
+    /**
+     * Menghapus book.
+     */
     public function destroy(Book $book): JsonResponse
     {
         $book->delete();
+        Cache::forget('dashboard.summary');
 
         return response()->json([
-            'message' => 'Book berhasil dihapus.',
+            'message' => 'Book dipindahkan ke sampah. Anda dapat membatalkan dalam '.self::UNDO_WINDOW_SECONDS.' detik.',
+            'data' => [
+                'id' => $book->id,
+                'undo_expires_at' => $this->undoExpiresAt($book)?->toIso8601String(),
+            ],
         ]);
     }
 
+    /**
+     * Memulihkan book yang baru saja di-soft delete selama masih dalam jendela undo.
+     */
+    public function restore(int $bookId): JsonResponse
+    {
+        $book = Book::withTrashed()->findOrFail($bookId);
+
+        if (! $book->trashed()) {
+            return response()->json([
+                'message' => 'Book ini tidak sedang berada di sampah.',
+            ], 422);
+        }
+
+        if (! Author::query()->whereKey($book->author_id)->exists()) {
+            return response()->json([
+                'message' => 'Book tidak dapat dipulihkan karena author terkait sudah tidak tersedia.',
+            ], 422);
+        }
+
+        if (! $this->canUndo($book)) {
+            return response()->json([
+                'message' => 'Batas waktu undo untuk book ini sudah habis.',
+            ], 410);
+        }
+
+        $book->restore();
+        $book->load('author:id,name,slug');
+        Cache::forget('dashboard.summary');
+
+        return response()->json([
+            'message' => 'Book berhasil dipulihkan.',
+            'data' => $book,
+        ]);
+    }
+
+    /**
+     * Normalisasi payload book agar konsisten (trim, slug otomatis).
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
     private function normalizePayload(array $validated, ?Book $book = null): array
     {
         $title = trim($validated['title']);
@@ -113,6 +192,9 @@ class BookController extends Controller
         ];
     }
 
+    /**
+     * Menghasilkan slug unik untuk book.
+     */
     private function generateUniqueSlug(string $value, ?int $ignoreId = null): string
     {
         $baseSlug = Str::slug($value) ?: 'book';
@@ -130,5 +212,21 @@ class BookController extends Controller
         }
 
         return $slug;
+    }
+
+    /**
+     * Menentukan apakah book masih bisa di-undo dalam jendela waktu yang tersedia.
+     */
+    private function canUndo(Book $book): bool
+    {
+        return $this->undoExpiresAt($book)?->isFuture() ?? false;
+    }
+
+    /**
+     * Menghitung batas waktu undo book berdasarkan deleted_at.
+     */
+    private function undoExpiresAt(Book $book): ?Carbon
+    {
+        return $book->deleted_at?->copy()->addSeconds(self::UNDO_WINDOW_SECONDS);
     }
 }

@@ -32,6 +32,12 @@ export interface AuthorListItem {
   updated_at: string
 }
 
+export interface AuthorOption {
+  id: number
+  name: string
+  slug: string
+}
+
 export interface AuthorDetail extends AuthorListItem {
   books: BookListItem[]
 }
@@ -78,6 +84,10 @@ export interface AuthorResponse {
   message?: string
 }
 
+export interface AuthorOptionsResponse {
+  data: AuthorOption[]
+}
+
 export interface BookResponse {
   data: BookDetail
   message?: string
@@ -86,6 +96,11 @@ export interface BookResponse {
 export interface MutationResponse<T> {
   data?: T
   message: string
+}
+
+export interface UndoableDeletePayload {
+  id: number
+  undo_expires_at: string
 }
 
 export interface ValidationErrors {

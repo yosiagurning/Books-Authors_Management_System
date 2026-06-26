@@ -1,24 +1,18 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import { ApiError, apiRequest, buildQuery } from '@/lib/api'
 import type {
-  AuthorListItem,
+  AuthorOption,
+  AuthorOptionsResponse,
   BookDetail,
   BookListItem,
   BookResponse,
   MutationResponse,
   PaginatedResponse,
+  UndoableDeletePayload,
   ValidationErrors,
 } from '@/types'
-
-const props = defineProps<{
-  refreshToken: number
-}>()
-
-const emit = defineEmits<{
-  changed: []
-}>()
 
 const loading = ref(false)
 const detailLoading = ref(false)
@@ -28,16 +22,33 @@ const error = ref('')
 const successMessage = ref('')
 const list = ref<PaginatedResponse<BookListItem> | null>(null)
 const selectedBook = ref<BookDetail | null>(null)
-const authorOptions = ref<AuthorListItem[]>([])
+const authorOptions = ref<AuthorOption[]>([])
 const search = ref('')
 const authorId = ref<number | ''>('')
-const publishedFrom = ref('')
-const publishedTo = ref('')
+const publishedDate = ref('')
 const sortBy = ref<'title' | 'created_at' | 'updated_at' | 'published_date' | 'author'>('title')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 const page = ref(1)
 const mode = ref<'create' | 'edit'>('create')
+const formOpen = ref(false)
 const fieldErrors = ref<ValidationErrors>({})
+const deleteDialogOpen = ref(false)
+const deleteCandidate = ref<BookListItem | BookDetail | null>(null)
+const deleteSubmitting = ref(false)
+const deleteDialogError = ref('')
+const UNDO_WINDOW_SECONDS = 7
+let filterTimer: ReturnType<typeof setTimeout> | null = null
+let undoDismissTimer: ReturnType<typeof setTimeout> | null = null
+let undoCountdownTimer: ReturnType<typeof setInterval> | null = null
+
+const undoNotice = ref<{
+  id: number
+  label: string
+  expiresAt: number
+  durationMs: number
+  secondsLeft: number
+  progressPercent: number
+} | null>(null)
 
 const form = reactive({
   title: '',
@@ -95,10 +106,7 @@ async function loadAuthorsForSelect() {
   authorsLoading.value = true
 
   try {
-    const response = await apiRequest<PaginatedResponse<AuthorListItem>>(
-      `/authors${buildQuery({ per_page: 50, sort_by: 'name', sort_order: 'asc' })}`,
-    )
-
+    const response = await apiRequest<AuthorOptionsResponse>('/authors/options')
     authorOptions.value = response.data
   } catch (caughtError) {
     error.value =
@@ -120,8 +128,8 @@ async function loadBooks() {
         page: page.value,
         search: search.value,
         author_id: authorId.value,
-        published_from: publishedFrom.value,
-        published_to: publishedTo.value,
+        published_from: publishedDate.value,
+        published_to: publishedDate.value,
         sort_by: sortBy.value,
         sort_order: sortOrder.value,
         per_page: 10,
@@ -155,9 +163,15 @@ async function loadBookDetail(bookId: number) {
   }
 }
 
-function applyFilters() {
-  page.value = 1
-  void loadBooks()
+function scheduleFilters() {
+  if (filterTimer) {
+    clearTimeout(filterTimer)
+  }
+
+  filterTimer = setTimeout(() => {
+    page.value = 1
+    void loadBooks()
+  }, 250)
 }
 
 function goToPage(nextPage: number) {
@@ -173,12 +187,59 @@ function startCreate() {
   selectedBook.value = null
   resetMessages()
   resetForm()
+  formOpen.value = true
 }
 
 async function startEdit(bookId: number) {
   resetMessages()
   mode.value = 'edit'
+  formOpen.value = true
   await loadBookDetail(bookId)
+}
+
+function closeForm() {
+  formOpen.value = false
+  resetForm()
+}
+
+function validateForm() {
+  const next: ValidationErrors = {}
+
+  if (!form.title.trim()) {
+    next.title = ['Judul wajib diisi.']
+  }
+
+  if (form.author_id === '') {
+    next.author_id = ['Author wajib dipilih.']
+  }
+
+  if (!form.published_date) {
+    next.published_date = ['Tanggal terbit wajib diisi.']
+  }
+
+  if (form.page_count === '' || Number(form.page_count) < 1) {
+    next.page_count = ['Jumlah halaman wajib diisi (minimal 1).']
+  }
+
+  const isbn = form.isbn.trim()
+  if (!isbn) {
+    next.isbn = ['ISBN wajib diisi.']
+  } else if (!/^\d{13}$/.test(isbn)) {
+    next.isbn = ['ISBN wajib 13 digit angka.']
+  }
+
+  if (!form.description.trim()) {
+    next.description = ['Deskripsi wajib diisi.']
+  }
+
+  fieldErrors.value = next
+
+  if (Object.keys(next).length) {
+    error.value = 'Mohon lengkapi semua field.'
+    return false
+  }
+
+  return true
 }
 
 async function submitForm() {
@@ -186,13 +247,18 @@ async function submitForm() {
   resetMessages()
   fieldErrors.value = {}
 
+  if (!validateForm()) {
+    formSubmitting.value = false
+    return
+  }
+
   const payload = {
-    title: form.title,
+    title: form.title.trim(),
     author_id: form.author_id,
-    description: form.description || null,
-    isbn: form.isbn || null,
-    published_date: form.published_date || null,
-    page_count: form.page_count || null,
+    description: form.description.trim(),
+    isbn: form.isbn.trim(),
+    published_date: form.published_date,
+    page_count: form.page_count,
   }
 
   try {
@@ -221,7 +287,7 @@ async function submitForm() {
     }
 
     await loadBooks()
-    emit('changed')
+    closeForm()
   } catch (caughtError) {
     if (caughtError instanceof ApiError) {
       error.value = caughtError.message
@@ -234,31 +300,123 @@ async function submitForm() {
   }
 }
 
-async function deleteBook(book: BookListItem | BookDetail) {
-  const confirmed = window.confirm(`Hapus book "${book.title}"?`)
+function requestDelete(book: BookListItem | BookDetail) {
+  deleteCandidate.value = book
+  deleteDialogError.value = ''
+  deleteDialogOpen.value = true
+}
 
-  if (!confirmed) {
+function closeDeleteDialog() {
+  deleteDialogOpen.value = false
+  deleteCandidate.value = null
+  deleteDialogError.value = ''
+  deleteSubmitting.value = false
+}
+
+function clearUndoTimers() {
+  if (undoDismissTimer) {
+    clearTimeout(undoDismissTimer)
+    undoDismissTimer = null
+  }
+
+  if (undoCountdownTimer) {
+    clearInterval(undoCountdownTimer)
+    undoCountdownTimer = null
+  }
+}
+
+function dismissUndoNotice() {
+  clearUndoTimers()
+  undoNotice.value = null
+}
+
+function startUndoNotice(payload: UndoableDeletePayload, label: string) {
+  clearUndoTimers()
+
+  const expiresAt = new Date(payload.undo_expires_at).getTime()
+  const durationMs = Math.max(1, expiresAt - Date.now())
+  undoNotice.value = {
+    id: payload.id,
+    label,
+    expiresAt,
+    durationMs,
+    secondsLeft: UNDO_WINDOW_SECONDS,
+    progressPercent: 100,
+  }
+
+  const updateCountdown = () => {
+    if (!undoNotice.value) {
+      return
+    }
+
+    const remainingMs = Math.max(0, undoNotice.value.expiresAt - Date.now())
+    undoNotice.value.secondsLeft = Math.max(0, Math.ceil(remainingMs / 1000))
+    undoNotice.value.progressPercent = Math.max(
+      0,
+      Math.min(100, (remainingMs / undoNotice.value.durationMs) * 100),
+    )
+  }
+
+  updateCountdown()
+  undoCountdownTimer = setInterval(updateCountdown, 250)
+  undoDismissTimer = setTimeout(() => {
+    dismissUndoNotice()
+  }, Math.max(0, expiresAt - Date.now()))
+}
+
+async function undoDelete() {
+  if (!undoNotice.value) {
     return
   }
 
-  resetMessages()
-
   try {
-    const response = await apiRequest<MutationResponse<null>>(`/books/${book.id}`, {
-      method: 'DELETE',
+    const response = await apiRequest<MutationResponse<BookDetail>>(`/books/${undoNotice.value.id}/restore`, {
+      method: 'POST',
     })
 
     successMessage.value = response.message
+    dismissUndoNotice()
+    await loadBooks()
+  } catch (caughtError) {
+    error.value =
+      caughtError instanceof ApiError ? caughtError.message : 'Book gagal dipulihkan.'
+    dismissUndoNotice()
+    await loadBooks()
+  }
+}
 
-    if (selectedBook.value?.id === book.id) {
+async function confirmDelete() {
+  if (!deleteCandidate.value || deleteSubmitting.value) {
+    return
+  }
+
+  deleteSubmitting.value = true
+  deleteDialogError.value = ''
+
+  try {
+    const bookToDelete = deleteCandidate.value
+    const response = await apiRequest<MutationResponse<UndoableDeletePayload>>(`/books/${bookToDelete.id}`, {
+      method: 'DELETE',
+    })
+
+    successMessage.value = ''
+    error.value = ''
+    if (response.data) {
+      startUndoNotice(response.data, bookToDelete.title)
+    }
+
+    if (selectedBook.value?.id === bookToDelete.id) {
       selectedBook.value = null
       resetForm()
     }
 
     await loadBooks()
-    emit('changed')
+    closeDeleteDialog()
   } catch (caughtError) {
-    error.value = caughtError instanceof ApiError ? caughtError.message : 'Book gagal dihapus.'
+    deleteDialogError.value =
+      caughtError instanceof ApiError ? caughtError.message : 'Book gagal dihapus.'
+  } finally {
+    deleteSubmitting.value = false
   }
 }
 
@@ -267,21 +425,17 @@ onMounted(() => {
   void loadAuthorsForSelect()
 })
 
-watch([sortBy, sortOrder, authorId], () => {
-  applyFilters()
+onBeforeUnmount(() => {
+  if (filterTimer) {
+    clearTimeout(filterTimer)
+  }
+
+  dismissUndoNotice()
 })
 
-watch(
-  () => props.refreshToken,
-  () => {
-    void loadBooks()
-    void loadAuthorsForSelect()
-
-    if (selectedBook.value) {
-      void loadBookDetail(selectedBook.value.id)
-    }
-  },
-)
+watch([search, authorId, publishedDate, sortBy, sortOrder], () => {
+  scheduleFilters()
+})
 </script>
 
 <template>
@@ -306,13 +460,34 @@ watch(
         {{ successMessage }}
       </div>
 
+      <div v-if="undoNotice" class="undo-toast" role="status" aria-live="polite">
+        <div class="undo-toast-content">
+          <div class="undo-toast-copy">
+            <strong>Book dihapus sementara</strong>
+            <p>
+              <span>{{ undoNotice.label }}</span> bisa dipulihkan dalam
+              {{ undoNotice.secondsLeft }} detik.
+            </p>
+          </div>
+          <button class="button button-secondary button-sm" type="button" @click="undoDelete">
+            Undo
+          </button>
+        </div>
+        <div class="undo-toast-progress">
+          <div
+            class="undo-toast-progress-bar"
+            :style="{ width: `${undoNotice.progressPercent}%` }"
+          />
+        </div>
+      </div>
+
       <div v-if="error" class="message message-error">
         {{ error }}
       </div>
 
       <div class="toolbar">
-        <div class="toolbar-group">
-          <div class="field">
+        <div class="toolbar-group toolbar-group-primary">
+          <div class="field field-search">
             <label for="book-search">Cari book</label>
             <input
               id="book-search"
@@ -320,34 +495,26 @@ watch(
               class="input"
               type="search"
               placeholder="Judul book..."
-              @keyup.enter="applyFilters"
             />
           </div>
 
           <div class="field">
             <label for="book-author">Filter author</label>
-            <select id="book-author" v-model="authorId" class="select">
+            <select id="book-author" v-model="authorId" class="select" :disabled="authorsLoading">
               <option value="">Semua author</option>
               <option v-for="author in authorOptions" :key="author.id" :value="author.id">
                 {{ author.name }}
               </option>
             </select>
           </div>
-        </div>
-
-        <div class="toolbar-group">
-          <div class="field">
-            <label for="published-from">Terbit dari</label>
-            <input id="published-from" v-model="publishedFrom" class="input" type="date" />
-          </div>
 
           <div class="field">
-            <label for="published-to">Sampai</label>
-            <input id="published-to" v-model="publishedTo" class="input" type="date" />
+            <label for="published-date">Tanggal terbit</label>
+            <input id="published-date" v-model="publishedDate" class="input" type="date" />
           </div>
         </div>
 
-        <div class="toolbar-group">
+        <div class="toolbar-group toolbar-group-secondary">
           <div class="field">
             <label for="book-sort">Urutkan</label>
             <select id="book-sort" v-model="sortBy" class="select">
@@ -366,17 +533,10 @@ watch(
               <option value="desc">Descending</option>
             </select>
           </div>
-
-          <div class="field">
-            <label>&nbsp;</label>
-            <button class="button button-secondary" type="button" @click="applyFilters">
-              Terapkan
-            </button>
-          </div>
         </div>
       </div>
 
-      <div v-if="list?.data.length">
+      <div v-if="loading && !list" class="table-wrap">
         <table class="data-table">
           <thead>
             <tr>
@@ -388,30 +548,64 @@ watch(
             </tr>
           </thead>
           <tbody>
-            <tr v-for="book in list.data" :key="book.id">
+            <tr v-for="n in 6" :key="n">
               <td>
-                <strong>{{ book.title }}</strong>
-                <div class="muted">{{ book.isbn || 'ISBN belum diisi' }}</div>
+                <div class="skeleton h-4 w-52" />
+                <div class="skeleton mt-2 h-3 w-28" />
               </td>
-              <td>{{ book.author?.name || '-' }}</td>
-              <td>{{ formatDate(book.published_date) }}</td>
-              <td>{{ book.page_count || '-' }}</td>
+              <td><div class="skeleton h-4 w-32" /></td>
+              <td><div class="skeleton h-4 w-24" /></td>
+              <td><div class="skeleton h-4 w-14" /></td>
               <td>
-                <div class="actions">
-                  <button class="button button-ghost" type="button" @click="loadBookDetail(book.id)">
-                    Detail
-                  </button>
-                  <button class="button button-secondary" type="button" @click="startEdit(book.id)">
-                    Edit
-                  </button>
-                  <button class="button button-danger" type="button" @click="deleteBook(book)">
-                    Hapus
-                  </button>
+                <div class="flex flex-wrap gap-2">
+                  <div class="skeleton h-8 w-16" />
+                  <div class="skeleton h-8 w-14" />
+                  <div class="skeleton h-8 w-16" />
                 </div>
               </td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div v-else-if="list?.data.length">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Judul</th>
+                <th>Author</th>
+                <th>Terbit</th>
+                <th>Pages</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="book in list.data" :key="book.id">
+                <td>
+                  <strong>{{ book.title }}</strong>
+                  <div class="muted">{{ book.isbn || 'ISBN belum diisi' }}</div>
+                </td>
+                <td>{{ book.author?.name || '-' }}</td>
+                <td>{{ formatDate(book.published_date) }}</td>
+                <td>{{ book.page_count || '-' }}</td>
+                <td>
+                  <div class="actions table-actions">
+                    <button class="button button-ghost" type="button" @click="loadBookDetail(book.id)">
+                      Detail
+                    </button>
+                    <button class="button button-secondary" type="button" @click="startEdit(book.id)">
+                      Edit
+                    </button>
+                  <button class="button button-danger" type="button" @click="requestDelete(book)">
+                      Hapus
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <div class="pagination">
           <div class="pagination-meta">
@@ -448,99 +642,39 @@ watch(
       <div class="panel">
         <div class="panel-header">
           <div>
-            <h3 class="panel-title">{{ mode === 'create' ? 'Tambah Book' : 'Edit Book' }}</h3>
-            <p class="panel-subtitle">Hubungkan book ke author yang valid lalu simpan.</p>
-          </div>
-          <button class="button button-ghost" type="button" @click="startCreate">Reset</button>
-        </div>
-
-        <div v-if="authorsLoading" class="message message-info">
-          Mengambil daftar author untuk form...
-        </div>
-
-        <form class="form-grid" @submit.prevent="submitForm">
-          <div class="field">
-            <label for="book-title">Judul</label>
-            <input id="book-title" v-model="form.title" class="input" type="text" />
-            <div v-if="fieldErrors.title?.length" class="error-text">{{ fieldErrors.title[0] }}</div>
-          </div>
-
-          <div class="field">
-            <label for="book-author-id">Author</label>
-            <select id="book-author-id" v-model="form.author_id" class="select">
-              <option value="">Pilih author</option>
-              <option v-for="author in authorOptions" :key="author.id" :value="author.id">
-                {{ author.name }}
-              </option>
-            </select>
-            <div v-if="fieldErrors.author_id?.length" class="error-text">
-              {{ fieldErrors.author_id[0] }}
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="book-published-date">Tanggal terbit</label>
-            <input
-              id="book-published-date"
-              v-model="form.published_date"
-              class="input"
-              type="date"
-            />
-            <div v-if="fieldErrors.published_date?.length" class="error-text">
-              {{ fieldErrors.published_date[0] }}
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="book-page-count">Jumlah halaman</label>
-            <input
-              id="book-page-count"
-              v-model="form.page_count"
-              class="input"
-              type="number"
-              min="1"
-            />
-            <div v-if="fieldErrors.page_count?.length" class="error-text">
-              {{ fieldErrors.page_count[0] }}
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="book-isbn">ISBN</label>
-            <input id="book-isbn" v-model="form.isbn" class="input" type="text" />
-            <div v-if="fieldErrors.isbn?.length" class="error-text">{{ fieldErrors.isbn[0] }}</div>
-          </div>
-
-          <div class="field field-full">
-            <label for="book-description">Deskripsi</label>
-            <textarea id="book-description" v-model="form.description" class="textarea" />
-            <div v-if="fieldErrors.description?.length" class="error-text">
-              {{ fieldErrors.description[0] }}
-            </div>
-          </div>
-
-          <div class="field field-full">
-            <div class="actions">
-              <button class="button button-primary" type="submit" :disabled="formSubmitting">
-                {{ formSubmitting ? 'Menyimpan...' : mode === 'create' ? 'Simpan Book' : 'Update Book' }}
-              </button>
-              <button class="button button-secondary" type="button" @click="startCreate">
-                Batal
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
-
-      <div class="panel">
-        <div class="panel-header">
-          <div>
             <h3 class="panel-title">Detail Book</h3>
             <p class="panel-subtitle">Pilih book dari tabel untuk meninjau detail dan author terkait.</p>
           </div>
         </div>
 
-        <div v-if="detailLoading" class="message message-info">Memuat detail book...</div>
+        <div v-if="detailLoading" class="detail-card">
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span>Judul</span>
+              <div class="skeleton mt-2 h-4 w-56" />
+            </div>
+            <div class="detail-item">
+              <span>Author</span>
+              <div class="skeleton mt-2 h-4 w-40" />
+            </div>
+            <div class="detail-item">
+              <span>Tanggal terbit</span>
+              <div class="skeleton mt-2 h-4 w-28" />
+            </div>
+            <div class="detail-item">
+              <span>ISBN</span>
+              <div class="skeleton mt-2 h-4 w-36" />
+            </div>
+            <div class="detail-item">
+              <span>Jumlah halaman</span>
+              <div class="skeleton mt-2 h-4 w-20" />
+            </div>
+            <div class="detail-item">
+              <span>Deskripsi</span>
+              <div class="skeleton mt-2 h-4 w-64" />
+            </div>
+          </div>
+        </div>
 
         <div v-else-if="selectedBook" class="detail-card">
           <div class="detail-grid">
@@ -577,4 +711,160 @@ watch(
       </div>
     </div>
   </section>
+
+  <transition name="drawer">
+    <div
+      v-if="formOpen"
+      class="fixed inset-0 z-50 flex justify-end bg-slate-950/40 p-5 backdrop-blur-sm"
+      @click.self="closeForm"
+    >
+      <div class="drawer h-full w-full max-w-[560px] overflow-y-auto">
+        <div class="panel form-panel">
+          <div class="panel-header">
+            <div>
+              <h3 class="panel-title">{{ mode === 'create' ? 'Tambah Book' : 'Edit Book' }}</h3>
+              <p class="panel-subtitle">Hubungkan book ke author yang valid lalu simpan.</p>
+            </div>
+            <button class="button button-ghost" type="button" @click="closeForm">Tutup</button>
+          </div>
+
+          <div v-if="authorsLoading" class="message message-info">
+            <div class="skeleton h-3 w-56" />
+            <div class="skeleton mt-2 h-3 w-40" />
+          </div>
+
+          <form class="form-grid" @submit.prevent="submitForm">
+            <div class="field">
+              <label for="book-title">Judul</label>
+              <input id="book-title" v-model="form.title" class="input" type="text" required />
+              <div v-if="fieldErrors.title?.length" class="error-text">{{ fieldErrors.title[0] }}</div>
+            </div>
+
+            <div class="field">
+              <label for="book-author-id">Author</label>
+              <select
+                id="book-author-id"
+                v-model="form.author_id"
+                class="select"
+                :disabled="authorsLoading"
+                required
+              >
+                <option value="">Pilih author</option>
+                <option v-for="author in authorOptions" :key="author.id" :value="author.id">
+                  {{ author.name }}
+                </option>
+              </select>
+              <div v-if="fieldErrors.author_id?.length" class="error-text">
+                {{ fieldErrors.author_id[0] }}
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="book-published-date">Tanggal terbit</label>
+              <input
+                id="book-published-date"
+                v-model="form.published_date"
+                class="input"
+                type="date"
+                required
+              />
+              <div v-if="fieldErrors.published_date?.length" class="error-text">
+                {{ fieldErrors.published_date[0] }}
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="book-page-count">Jumlah halaman</label>
+              <input
+                id="book-page-count"
+                v-model="form.page_count"
+                class="input"
+                type="number"
+                min="1"
+                required
+              />
+              <div v-if="fieldErrors.page_count?.length" class="error-text">
+                {{ fieldErrors.page_count[0] }}
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="book-isbn">ISBN</label>
+              <input
+                id="book-isbn"
+                v-model="form.isbn"
+                class="input"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                pattern="[0-9]{13}"
+                minlength="13"
+                maxlength="13"
+                required
+              />
+              <div v-if="fieldErrors.isbn?.length" class="error-text">{{ fieldErrors.isbn[0] }}</div>
+            </div>
+
+            <div class="field field-full">
+              <label for="book-description">Deskripsi</label>
+              <textarea id="book-description" v-model="form.description" class="textarea" required />
+              <div v-if="fieldErrors.description?.length" class="error-text">
+                {{ fieldErrors.description[0] }}
+              </div>
+            </div>
+
+            <div class="field field-full">
+              <div class="actions">
+                <button class="button button-primary" type="submit" :disabled="formSubmitting">
+                  {{ formSubmitting ? 'Menyimpan...' : mode === 'create' ? 'Simpan Book' : 'Update Book' }}
+                </button>
+                <button class="button button-secondary" type="button" @click="closeForm">
+                  Batal
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </transition>
+
+  <transition name="modal">
+    <div
+      v-if="deleteDialogOpen"
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-5 backdrop-blur-sm"
+      @click.self="closeDeleteDialog"
+    >
+      <div class="modal max-h-full w-full max-w-[520px] overflow-y-auto">
+        <div class="panel form-panel">
+          <div class="panel-header">
+            <div>
+              <h3 class="panel-title">Konfirmasi Hapus</h3>
+              <p class="panel-subtitle">Pastikan data yang dipilih sudah benar sebelum menghapus.</p>
+            </div>
+            <button class="button button-ghost" type="button" @click="closeDeleteDialog" :disabled="deleteSubmitting">
+              Tutup
+            </button>
+          </div>
+
+          <p class="muted">
+            Anda yakin ingin menghapus book <strong>{{ deleteCandidate?.title }}</strong>? Tindakan ini tidak dapat dibatalkan.
+          </p>
+
+          <div v-if="deleteDialogError" class="message message-error mt-4">
+            {{ deleteDialogError }}
+          </div>
+
+          <div class="mt-5 flex flex-wrap items-center justify-end gap-2">
+            <button class="button button-secondary" type="button" @click="closeDeleteDialog" :disabled="deleteSubmitting">
+              Batal
+            </button>
+            <button class="button button-danger" type="button" @click="confirmDelete" :disabled="deleteSubmitting">
+              {{ deleteSubmitting ? 'Menghapus...' : 'Hapus' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </transition>
 </template>

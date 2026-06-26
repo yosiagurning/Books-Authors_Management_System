@@ -5,6 +5,9 @@ namespace App\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
+/**
+ * Validasi payload untuk membuat Book.
+ */
 class StoreBookRequest extends FormRequest
 {
     public function authorize(): bool
@@ -12,15 +15,18 @@ class StoreBookRequest extends FormRequest
         return true;
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function rules(): array
     {
         return [
             'author_id' => ['required', 'integer', 'exists:authors,id'],
             'title' => ['required', 'string', 'max:255', 'regex:/.*\S.*/'],
-            'description' => ['nullable', 'string'],
-            'isbn' => ['nullable', 'string', 'max:32'],
-            'published_date' => ['nullable', 'date'],
-            'page_count' => ['nullable', 'integer', 'min:1'],
+            'description' => ['required', 'string', 'regex:/.*\S.*/'],
+            'isbn' => ['required', 'string', 'regex:/^\d{13}$/'],
+            'published_date' => ['required', 'date'],
+            'page_count' => ['required', 'integer', 'min:1'],
             'slug' => ['nullable', 'string', 'max:255', Rule::unique('books', 'slug')],
         ];
     }

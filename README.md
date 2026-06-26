@@ -179,8 +179,3 @@ Seeder backend akan menambahkan beberapa data author dan book contoh, termasuk:
 
 Tujuannya agar reviewer bisa langsung mencoba dashboard, list, detail, dan relasi data tanpa setup manual tambahan.
 
-## Catatan Implementasi
-
-- Frontend final menggunakan Vue.js + Vite, bukan Nuxt.js.
-- Styling saat ini memakai Tailwind CSS v4 melalui layer komponen semantik di `frontend/src/styles.css`.
-- Script frontend disesuaikan agar lebih aman pada environment Windows yang memiliki path dengan karakter `&`.
