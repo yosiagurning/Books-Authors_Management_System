@@ -1,0 +1,291 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    color-scheme: light;
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    text-rendering: optimizeLegibility;
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply m-0 min-h-screen min-w-80 bg-slate-50 text-slate-900 antialiased;
+    background:
+      radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 32%),
+      radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 26%),
+      #f8fafc;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    @apply cursor-pointer;
+  }
+
+  a {
+    @apply text-inherit no-underline;
+  }
+
+  #app {
+    @apply min-h-screen;
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply grid min-h-screen grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)];
+  }
+
+  .sidebar {
+    @apply border-r border-slate-300/30 bg-slate-950 px-5 py-7 text-slate-200;
+  }
+
+  .brand {
+    @apply mb-8;
+  }
+
+  .brand h1 {
+    @apply mb-2 text-xl font-bold;
+  }
+
+  .brand p {
+    @apply m-0 text-sm text-slate-400;
+  }
+
+  .nav-list {
+    @apply grid gap-2.5;
+  }
+
+  .nav-button {
+    @apply rounded-2xl border border-transparent bg-transparent px-3.5 py-3 text-left transition duration-200 ease-out;
+  }
+
+  .nav-button:hover {
+    @apply bg-slate-400/10;
+  }
+
+  .nav-button.is-active {
+    @apply translate-x-0.5 border-sky-300/40 bg-blue-500/20;
+  }
+
+  .main-content {
+    @apply p-5 lg:p-7;
+  }
+
+  .hero {
+    @apply mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between;
+  }
+
+  .hero h2 {
+    @apply mb-2 text-3xl font-bold tracking-tight;
+  }
+
+  .hero p {
+    @apply m-0 max-w-3xl text-slate-600;
+  }
+
+  .panel {
+    @apply rounded-3xl border border-slate-200/80 bg-white/90 p-6 shadow-xl backdrop-blur-sm;
+  }
+
+  .panel + .panel {
+    @apply mt-5;
+  }
+
+  .panel-header {
+    @apply mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between;
+  }
+
+  .panel-title {
+    @apply m-0 text-xl font-semibold text-slate-900;
+  }
+
+  .panel-subtitle {
+    @apply mt-1.5 text-sm text-slate-500;
+  }
+
+  .stats-grid {
+    @apply grid grid-cols-1 gap-4 sm:grid-cols-2;
+  }
+
+  .stat-card {
+    @apply rounded-3xl border border-slate-200 bg-gradient-to-b from-slate-50 to-slate-100 p-5;
+  }
+
+  .stat-card span {
+    @apply block text-sm text-slate-500;
+  }
+
+  .stat-card strong {
+    @apply mt-2 block text-4xl font-bold tracking-tight text-slate-900;
+  }
+
+  .columns {
+    @apply grid grid-cols-1 gap-5 xl:grid-cols-[1.6fr_minmax(0,1fr)];
+  }
+
+  .stack {
+    @apply grid gap-5;
+  }
+
+  .toolbar {
+    @apply mb-4 flex flex-wrap gap-3;
+  }
+
+  .toolbar-group {
+    @apply flex flex-wrap items-end gap-2.5;
+  }
+
+  .field {
+    @apply grid gap-1.5;
+    min-width: 160px;
+  }
+
+  .field label {
+    @apply text-sm font-semibold text-slate-600;
+  }
+
+  .input,
+  .select,
+  .textarea {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100;
+  }
+
+  .textarea {
+    @apply min-h-30 resize-y;
+  }
+
+  .actions {
+    @apply flex flex-wrap gap-2.5;
+  }
+
+  .button {
+    @apply rounded-xl border border-transparent px-3.5 py-2.5 text-sm font-medium transition duration-200 ease-out hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0;
+  }
+
+  .button-primary {
+    @apply bg-blue-600 text-white hover:bg-blue-700;
+  }
+
+  .button-secondary {
+    @apply border-slate-200 bg-slate-200 text-slate-900 hover:bg-slate-300;
+  }
+
+  .button-danger {
+    @apply border-red-200 bg-red-100 text-red-800 hover:bg-red-200;
+  }
+
+  .button-ghost {
+    @apply border-slate-300 bg-transparent text-slate-700 hover:bg-slate-100;
+  }
+
+  .data-table {
+    @apply w-full border-collapse;
+  }
+
+  .data-table th,
+  .data-table td {
+    @apply border-b border-slate-200 px-3 py-3.5 text-left align-top;
+  }
+
+  .data-table th {
+    @apply text-sm font-bold text-slate-600;
+  }
+
+  .muted {
+    @apply text-slate-500;
+  }
+
+  .message {
+    @apply mb-4 rounded-2xl px-3.5 py-3 text-sm font-medium;
+  }
+
+  .message-success {
+    @apply bg-emerald-100 text-emerald-800;
+  }
+
+  .message-error {
+    @apply bg-red-100 text-red-800;
+  }
+
+  .message-info {
+    @apply bg-blue-100 text-blue-800;
+  }
+
+  .detail-card {
+    @apply rounded-3xl border border-slate-200 bg-white p-5;
+  }
+
+  .detail-grid {
+    @apply grid gap-3;
+  }
+
+  .detail-item span {
+    @apply block text-xs font-medium uppercase tracking-wide text-slate-500;
+  }
+
+  .detail-item strong {
+    @apply mt-1 block text-sm font-semibold text-slate-900;
+  }
+
+  .list-reset {
+    @apply m-0 list-none p-0;
+  }
+
+  .mini-list {
+    @apply grid gap-3;
+  }
+
+  .mini-list-item {
+    @apply rounded-2xl border border-slate-200 bg-white p-4;
+  }
+
+  .pagination {
+    @apply mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between;
+  }
+
+  .pagination-meta {
+    @apply text-sm text-slate-500;
+  }
+
+  .form-grid {
+    @apply grid grid-cols-1 gap-3.5 md:grid-cols-2;
+  }
+
+  .form-grid .field-full {
+    grid-column: 1 / -1;
+  }
+
+  .error-text {
+    @apply text-xs font-medium text-red-700;
+  }
+
+  .empty-state {
+    @apply rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700;
+  }
+}
+
+@media (max-width: 720px) {
+  .data-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
