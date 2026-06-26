@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import { ApiError, apiRequest, buildQuery } from '@/lib/api'
+import { useToast } from '@/lib/toast'
 import type {
   AuthorDetail,
   AuthorListItem,
@@ -11,17 +12,34 @@ import type {
   UndoableDeletePayload,
   ValidationErrors,
 } from '@/types'
+import {
+  Plus,
+  RefreshCw,
+  Search,
+  Eye,
+  Pencil,
+  Trash2,
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  AlertTriangle,
+  Users,
+  UserCircle2,
+  BookOpen,
+} from 'lucide-vue-next'
+
+type SortKey = 'name' | 'created_at' | 'updated_at' | 'books_count'
 
 const loading = ref(false)
 const detailLoading = ref(false)
 const formSubmitting = ref(false)
 const error = ref('')
-const successMessage = ref('')
 const list = ref<PaginatedResponse<AuthorListItem> | null>(null)
 const selectedAuthor = ref<AuthorDetail | null>(null)
 const search = ref('')
 const hasBooks = ref<'all' | 'with' | 'without'>('all')
-const sortBy = ref<'name' | 'created_at' | 'updated_at' | 'books_count'>('name')
+const sortBy = ref<SortKey>('name')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 const page = ref(1)
 const mode = ref<'create' | 'edit'>('create')
@@ -35,6 +53,8 @@ const UNDO_WINDOW_SECONDS = 7
 let filterTimer: ReturnType<typeof setTimeout> | null = null
 let undoDismissTimer: ReturnType<typeof setTimeout> | null = null
 let undoCountdownTimer: ReturnType<typeof setInterval> | null = null
+
+const toast = useToast()
 
 const undoNotice = ref<{
   id: number
@@ -52,25 +72,15 @@ const form = reactive({
   nationality: '',
 })
 
-const formatter = new Intl.DateTimeFormat('id-ID', {
-  dateStyle: 'medium',
-})
+const formatter = new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' })
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return '-'
-  }
-
+  if (!value) return '-'
   return formatter.format(new Date(value))
 }
 
 function normalizeDateInput(value: string | null) {
   return value ? value.slice(0, 10) : ''
-}
-
-function resetMessages() {
-  error.value = ''
-  successMessage.value = ''
 }
 
 function resetForm() {
@@ -106,11 +116,10 @@ async function loadAuthors() {
         per_page: 10,
       })}`,
     )
-
     list.value = response
   } catch (caughtError) {
-    error.value =
-      caughtError instanceof ApiError ? caughtError.message : 'Daftar author gagal dimuat.'
+    const msg = caughtError instanceof ApiError ? caughtError.message : 'Daftar author gagal dimuat.'
+    error.value = msg
   } finally {
     loading.value = false
   }
@@ -123,23 +132,20 @@ async function loadAuthorDetail(authorId: number) {
   try {
     const response = await apiRequest<AuthorResponse>(`/authors/${authorId}`)
     selectedAuthor.value = response.data
-
     if (mode.value === 'edit') {
       fillForm(response.data)
     }
   } catch (caughtError) {
-    error.value =
-      caughtError instanceof ApiError ? caughtError.message : 'Detail author gagal dimuat.'
+    const msg = caughtError instanceof ApiError ? caughtError.message : 'Detail author gagal dimuat.'
+    error.value = msg
+    toast.error('Gagal memuat detail', msg)
   } finally {
     detailLoading.value = false
   }
 }
 
 function scheduleFilters() {
-  if (filterTimer) {
-    clearTimeout(filterTimer)
-  }
-
+  if (filterTimer) clearTimeout(filterTimer)
   filterTimer = setTimeout(() => {
     page.value = 1
     void loadAuthors()
@@ -147,23 +153,18 @@ function scheduleFilters() {
 }
 
 function goToPage(nextPage: number) {
-  if (!list.value || nextPage < 1 || nextPage > list.value.last_page) {
-    return
-  }
-
+  if (!list.value || nextPage < 1 || nextPage > list.value.last_page) return
   page.value = nextPage
   void loadAuthors()
 }
 
 function startCreate() {
   selectedAuthor.value = null
-  resetMessages()
   resetForm()
   formOpen.value = true
 }
 
 async function startEdit(authorId: number) {
-  resetMessages()
   mode.value = 'edit'
   formOpen.value = true
   await loadAuthorDetail(authorId)
@@ -174,38 +175,38 @@ function closeForm() {
   resetForm()
 }
 
+function toggleSort(key: SortKey) {
+  if (sortBy.value === key) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortBy.value = key
+    sortOrder.value = 'asc'
+  }
+}
+
+function clearFilters() {
+  search.value = ''
+  hasBooks.value = 'all'
+  sortBy.value = 'name'
+  sortOrder.value = 'asc'
+}
+
 function validateForm() {
   const next: ValidationErrors = {}
-
-  if (!form.name.trim()) {
-    next.name = ['Nama wajib diisi.']
-  }
-
-  if (!form.nationality.trim()) {
-    next.nationality = ['Nationality wajib diisi.']
-  }
-
-  if (!form.birth_date) {
-    next.birth_date = ['Tanggal lahir wajib diisi.']
-  }
-
-  if (!form.bio.trim()) {
-    next.bio = ['Bio wajib diisi.']
-  }
-
+  if (!form.name.trim()) next.name = ['Nama wajib diisi.']
+  if (!form.nationality.trim()) next.nationality = ['Nationality wajib diisi.']
+  if (!form.birth_date) next.birth_date = ['Tanggal lahir wajib diisi.']
+  if (!form.bio.trim()) next.bio = ['Bio wajib diisi.']
   fieldErrors.value = next
-
   if (Object.keys(next).length) {
-    error.value = 'Mohon lengkapi semua field.'
+    toast.error('Form belum lengkap', 'Mohon lengkapi semua field yang ditandai.')
     return false
   }
-
   return true
 }
 
 async function submitForm() {
   formSubmitting.value = true
-  resetMessages()
   fieldErrors.value = {}
 
   if (!validateForm()) {
@@ -226,33 +227,25 @@ async function submitForm() {
         method: 'POST',
         body: payload,
       })
-
-      successMessage.value = response.message
+      toast.success('Author ditambahkan', response.message)
       resetForm()
     } else if (selectedAuthor.value) {
       const response = await apiRequest<MutationResponse<AuthorDetail>>(
         `/authors/${selectedAuthor.value.id}`,
-        {
-          method: 'PUT',
-          body: payload,
-        },
+        { method: 'PUT', body: payload },
       )
-
-      successMessage.value = response.message
+      toast.success('Author diperbarui', response.message)
       await loadAuthorDetail(selectedAuthor.value.id)
-      if (selectedAuthor.value) {
-        fillForm(selectedAuthor.value)
-      }
+      if (selectedAuthor.value) fillForm(selectedAuthor.value)
     }
-
     await loadAuthors()
     closeForm()
   } catch (caughtError) {
     if (caughtError instanceof ApiError) {
-      error.value = caughtError.message
       fieldErrors.value = caughtError.errors
+      toast.error('Gagal menyimpan', caughtError.message)
     } else {
-      error.value = 'Author gagal disimpan.'
+      toast.error('Gagal menyimpan', 'Author gagal disimpan.')
     }
   } finally {
     formSubmitting.value = false
@@ -277,7 +270,6 @@ function clearUndoTimers() {
     clearTimeout(undoDismissTimer)
     undoDismissTimer = null
   }
-
   if (undoCountdownTimer) {
     clearInterval(undoCountdownTimer)
     undoCountdownTimer = null
@@ -291,7 +283,6 @@ function dismissUndoNotice() {
 
 function startUndoNotice(payload: UndoableDeletePayload, label: string) {
   clearUndoTimers()
-
   const expiresAt = new Date(payload.undo_expires_at).getTime()
   const durationMs = Math.max(1, expiresAt - Date.now())
   undoNotice.value = {
@@ -302,12 +293,8 @@ function startUndoNotice(payload: UndoableDeletePayload, label: string) {
     secondsLeft: UNDO_WINDOW_SECONDS,
     progressPercent: 100,
   }
-
-  const updateCountdown = () => {
-    if (!undoNotice.value) {
-      return
-    }
-
+  const update = () => {
+    if (!undoNotice.value) return
     const remainingMs = Math.max(0, undoNotice.value.expiresAt - Date.now())
     undoNotice.value.secondsLeft = Math.max(0, Math.ceil(remainingMs / 1000))
     undoNotice.value.progressPercent = Math.max(
@@ -315,94 +302,68 @@ function startUndoNotice(payload: UndoableDeletePayload, label: string) {
       Math.min(100, (remainingMs / undoNotice.value.durationMs) * 100),
     )
   }
-
-  updateCountdown()
-  undoCountdownTimer = setInterval(updateCountdown, 250)
-  undoDismissTimer = setTimeout(() => {
-    dismissUndoNotice()
-  }, Math.max(0, expiresAt - Date.now()))
+  update()
+  undoCountdownTimer = setInterval(update, 250)
+  undoDismissTimer = setTimeout(dismissUndoNotice, Math.max(0, expiresAt - Date.now()))
 }
 
 async function undoDelete() {
-  if (!undoNotice.value) {
-    return
-  }
-
+  if (!undoNotice.value) return
   try {
-    const response = await apiRequest<MutationResponse<AuthorDetail>>(`/authors/${undoNotice.value.id}/restore`, {
-      method: 'POST',
-    })
-
-    successMessage.value = response.message
+    const response = await apiRequest<MutationResponse<AuthorDetail>>(
+      `/authors/${undoNotice.value.id}/restore`,
+      { method: 'POST' },
+    )
+    toast.success('Author dipulihkan', response.message)
     dismissUndoNotice()
     await loadAuthors()
   } catch (caughtError) {
-    error.value =
-      caughtError instanceof ApiError ? caughtError.message : 'Author gagal dipulihkan.'
+    const msg = caughtError instanceof ApiError ? caughtError.message : 'Author gagal dipulihkan.'
+    toast.error('Gagal undo', msg)
     dismissUndoNotice()
     await loadAuthors()
   }
 }
 
 async function confirmDelete() {
-  if (!deleteCandidate.value || deleteSubmitting.value) {
-    return
-  }
-
+  if (!deleteCandidate.value || deleteSubmitting.value) return
   deleteSubmitting.value = true
   deleteDialogError.value = ''
-
   try {
     const authorToDelete = deleteCandidate.value
-    const response = await apiRequest<MutationResponse<UndoableDeletePayload>>(`/authors/${authorToDelete.id}`, {
-      method: 'DELETE',
-    })
-
-    successMessage.value = ''
-    error.value = ''
-    if (response.data) {
-      startUndoNotice(response.data, authorToDelete.name)
-    }
-
+    const response = await apiRequest<MutationResponse<UndoableDeletePayload>>(
+      `/authors/${authorToDelete.id}`,
+      { method: 'DELETE' },
+    )
+    if (response.data) startUndoNotice(response.data, authorToDelete.name)
     if (selectedAuthor.value?.id === authorToDelete.id) {
       selectedAuthor.value = null
       resetForm()
     }
-
     await loadAuthors()
     closeDeleteDialog()
   } catch (caughtError) {
-    deleteDialogError.value =
-      caughtError instanceof ApiError ? caughtError.message : 'Author gagal dihapus.'
+    const msg = caughtError instanceof ApiError ? caughtError.message : 'Author gagal dihapus.'
+    deleteDialogError.value = msg
   } finally {
     deleteSubmitting.value = false
   }
 }
 
-onMounted(() => {
-  void loadAuthors()
-})
+onMounted(() => { void loadAuthors() })
 
 onBeforeUnmount(() => {
-  if (filterTimer) {
-    clearTimeout(filterTimer)
-  }
-
+  if (filterTimer) clearTimeout(filterTimer)
   dismissUndoNotice()
 })
 
-watch(search, () => {
-  scheduleFilters()
-})
-
-watch([hasBooks, sortBy, sortOrder], () => {
-  scheduleFilters()
-})
+watch(search, () => scheduleFilters())
+watch([hasBooks, sortBy, sortOrder], () => scheduleFilters())
 </script>
 
 <template>
   <section class="columns">
-    <div class="panel">
+    <div class="panel" data-testid="authors-panel">
       <div class="panel-header">
         <div>
           <h3 class="panel-title">Manage Authors</h3>
@@ -411,58 +372,56 @@ watch([hasBooks, sortBy, sortOrder], () => {
           </p>
         </div>
         <div class="actions">
-          <button class="button button-ghost" type="button" @click="loadAuthors" :disabled="loading">
-            {{ loading ? 'Memuat...' : 'Refresh' }}
+          <button
+            class="button button-secondary button-sm"
+            type="button"
+            :disabled="loading"
+            data-testid="authors-refresh"
+            @click="loadAuthors"
+          >
+            <RefreshCw :size="13" :stroke-width="2" :class="{ 'animate-spin': loading }" />
+            {{ loading ? 'Memuat…' : 'Refresh' }}
           </button>
-          <button class="button button-primary" type="button" @click="startCreate">Tambah Author</button>
-        </div>
-      </div>
-
-      <div v-if="successMessage" class="message message-success">
-        {{ successMessage }}
-      </div>
-
-      <div v-if="undoNotice" class="undo-toast" role="status" aria-live="polite">
-        <div class="undo-toast-content">
-          <div class="undo-toast-copy">
-            <strong>Author dihapus sementara</strong>
-            <p>
-              <span>{{ undoNotice.label }}</span> bisa dipulihkan dalam
-              {{ undoNotice.secondsLeft }} detik.
-            </p>
-          </div>
-          <button class="button button-secondary button-sm" type="button" @click="undoDelete">
-            Undo
+          <button
+            class="button button-primary"
+            type="button"
+            data-testid="authors-create"
+            @click="startCreate"
+          >
+            <Plus :size="14" :stroke-width="2.25" />
+            Tambah Author
           </button>
-        </div>
-        <div class="undo-toast-progress">
-          <div
-            class="undo-toast-progress-bar"
-            :style="{ width: `${undoNotice.progressPercent}%` }"
-          />
         </div>
       </div>
 
       <div v-if="error" class="message message-error">
+        <AlertTriangle :size="14" :stroke-width="2" />
         {{ error }}
       </div>
 
+      <!-- Toolbar -->
       <div class="toolbar">
         <div class="toolbar-group toolbar-group-primary">
           <div class="field field-search">
             <label for="author-search">Cari author</label>
-            <input
-              id="author-search"
-              v-model="search"
-              class="input"
-              type="search"
-              placeholder="Nama author..."
-            />
+            <div class="input-with-icon">
+              <span class="input-with-icon-prefix">
+                <Search :size="14" :stroke-width="2" />
+              </span>
+              <input
+                id="author-search"
+                v-model="search"
+                class="input"
+                type="search"
+                placeholder="Nama author…"
+                data-testid="authors-search"
+              />
+            </div>
           </div>
 
           <div class="field">
             <label for="author-has-books">Status book</label>
-            <select id="author-has-books" v-model="hasBooks" class="select">
+            <select id="author-has-books" v-model="hasBooks" class="select" data-testid="authors-status">
               <option value="all">Semua</option>
               <option value="with">Punya book</option>
               <option value="without">Belum punya book</option>
@@ -472,25 +431,21 @@ watch([hasBooks, sortBy, sortOrder], () => {
 
         <div class="toolbar-group toolbar-group-secondary">
           <div class="field">
-            <label for="author-sort">Urutkan</label>
-            <select id="author-sort" v-model="sortBy" class="select">
-              <option value="name">Nama</option>
-              <option value="books_count">Jumlah book</option>
-              <option value="updated_at">Terakhir diubah</option>
-              <option value="created_at">Tanggal dibuat</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="author-order">Arah</label>
-            <select id="author-order" v-model="sortOrder" class="select">
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
-            </select>
+            <label>Tindakan</label>
+            <button
+              class="button button-ghost"
+              type="button"
+              data-testid="authors-clear"
+              @click="clearFilters"
+            >
+              <X :size="13" :stroke-width="2" />
+              Reset filter
+            </button>
           </div>
         </div>
       </div>
 
+      <!-- Loading skeleton -->
       <div v-if="loading && !list" class="table-wrap">
         <table class="data-table">
           <thead>
@@ -499,7 +454,7 @@ watch([hasBooks, sortBy, sortOrder], () => {
               <th>Nationality</th>
               <th>Books</th>
               <th>Updated</th>
-              <th>Aksi</th>
+              <th class="text-right">Aksi</th>
             </tr>
           </thead>
           <tbody>
@@ -512,7 +467,7 @@ watch([hasBooks, sortBy, sortOrder], () => {
               <td><div class="skeleton h-4 w-10" /></td>
               <td><div class="skeleton h-4 w-24" /></td>
               <td>
-                <div class="flex flex-wrap gap-2">
+                <div class="flex flex-wrap justify-end gap-2">
                   <div class="skeleton h-8 w-16" />
                   <div class="skeleton h-8 w-14" />
                   <div class="skeleton h-8 w-16" />
@@ -523,45 +478,105 @@ watch([hasBooks, sortBy, sortOrder], () => {
         </table>
       </div>
 
+      <!-- Data -->
       <div v-else-if="list?.data.length">
         <div class="table-wrap">
-          <table class="data-table">
+          <table class="data-table" data-testid="authors-table">
             <thead>
               <tr>
-                <th>Nama</th>
+                <th>
+                  <span
+                    :class="['th-sort', { 'is-active': sortBy === 'name', 'is-desc': sortBy === 'name' && sortOrder === 'desc' }]"
+                    role="button"
+                    tabindex="0"
+                    data-testid="sort-name"
+                    @click="toggleSort('name')"
+                    @keydown.enter.prevent="toggleSort('name')"
+                  >
+                    Nama
+                    <ChevronUp :size="12" :stroke-width="2.5" class="th-sort-icon" />
+                  </span>
+                </th>
                 <th>Nationality</th>
-                <th>Books</th>
-                <th>Updated</th>
-                <th>Aksi</th>
+                <th>
+                  <span
+                    :class="['th-sort', { 'is-active': sortBy === 'books_count', 'is-desc': sortBy === 'books_count' && sortOrder === 'desc' }]"
+                    role="button"
+                    tabindex="0"
+                    data-testid="sort-books-count"
+                    @click="toggleSort('books_count')"
+                    @keydown.enter.prevent="toggleSort('books_count')"
+                  >
+                    Books
+                    <ChevronUp :size="12" :stroke-width="2.5" class="th-sort-icon" />
+                  </span>
+                </th>
+                <th>
+                  <span
+                    :class="['th-sort', { 'is-active': sortBy === 'updated_at', 'is-desc': sortBy === 'updated_at' && sortOrder === 'desc' }]"
+                    role="button"
+                    tabindex="0"
+                    data-testid="sort-updated"
+                    @click="toggleSort('updated_at')"
+                    @keydown.enter.prevent="toggleSort('updated_at')"
+                  >
+                    Updated
+                    <ChevronUp :size="12" :stroke-width="2.5" class="th-sort-icon" />
+                  </span>
+                </th>
+                <th class="text-right">Aksi</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="author in list.data" :key="author.id">
                 <td>
-                  <strong>{{ author.name }}</strong>
-                  <div class="muted">{{ author.bio || 'Bio belum diisi' }}</div>
+                  <div class="flex items-start gap-3">
+                    <span class="stat-card-icon" style="height: 34px; width: 34px;">
+                      <UserCircle2 :size="16" :stroke-width="1.75" />
+                    </span>
+                    <div class="min-w-0">
+                      <strong>{{ author.name }}</strong>
+                      <div class="muted text-[12.5px] mt-0.5 line-clamp-2">
+                        {{ author.bio || 'Bio belum diisi' }}
+                      </div>
+                    </div>
+                  </div>
                 </td>
-                <td>{{ author.nationality || '-' }}</td>
-                <td>{{ author.books_count }}</td>
-                <td>{{ formatDate(author.updated_at) }}</td>
                 <td>
-                  <div class="actions">
+                  <span v-if="author.nationality" class="badge badge-neutral">{{ author.nationality }}</span>
+                  <span v-else class="muted">-</span>
+                </td>
+                <td>
+                  <span class="num">{{ author.books_count }}</span>
+                </td>
+                <td><span class="num">{{ formatDate(author.updated_at) }}</span></td>
+                <td>
+                  <div class="actions table-actions">
                     <button
-                      class="button button-ghost"
+                      class="button button-ghost button-sm"
                       type="button"
+                      :data-testid="`detail-${author.id}`"
                       @click="loadAuthorDetail(author.id)"
                     >
+                      <Eye :size="13" :stroke-width="2" />
                       Detail
                     </button>
                     <button
-                      class="button button-secondary"
+                      class="button button-secondary button-sm"
                       type="button"
+                      :data-testid="`edit-${author.id}`"
                       @click="startEdit(author.id)"
                     >
+                      <Pencil :size="13" :stroke-width="2" />
                       Edit
                     </button>
-                    <button class="button button-danger" type="button" @click="requestDelete(author)">
-                      Hapus
+                    <button
+                      class="button button-danger button-sm"
+                      type="button"
+                      :data-testid="`delete-${author.id}`"
+                      @click="requestDelete(author)"
+                    >
+                      <Trash2 :size="13" :stroke-width="2" />
                     </button>
                   </div>
                 </td>
@@ -572,35 +587,50 @@ watch([hasBooks, sortBy, sortOrder], () => {
 
         <div class="pagination">
           <div class="pagination-meta">
-            Menampilkan {{ list.from ?? 0 }}-{{ list.to ?? 0 }} dari {{ list.total }} author
+            Menampilkan
+            <strong>{{ list.from ?? 0 }}–{{ list.to ?? 0 }}</strong>
+            dari <strong>{{ list.total }}</strong> author
           </div>
 
-          <div class="actions">
+          <div class="pager" role="navigation" aria-label="Pagination">
             <button
-              class="button button-ghost"
               type="button"
               :disabled="list.current_page <= 1"
+              aria-label="Sebelumnya"
+              data-testid="page-prev"
               @click="goToPage(list.current_page - 1)"
             >
-              Sebelumnya
+              <ChevronLeft :size="14" :stroke-width="2.25" />
             </button>
+            <span class="pager-page is-active" :data-testid="`page-${list.current_page}`">
+              {{ list.current_page }}
+            </span>
+            <span class="pager-page muted">/ {{ list.last_page }}</span>
             <button
-              class="button button-ghost"
               type="button"
               :disabled="list.current_page >= list.last_page"
+              aria-label="Berikutnya"
+              data-testid="page-next"
               @click="goToPage(list.current_page + 1)"
             >
-              Berikutnya
+              <ChevronRight :size="14" :stroke-width="2.25" />
             </button>
           </div>
         </div>
       </div>
 
       <div v-else class="empty-state">
-        {{ loading ? 'Memuat author...' : 'Belum ada author yang cocok dengan filter saat ini.' }}
+        <span class="empty-state-icon">
+          <Users :size="18" :stroke-width="1.75" />
+        </span>
+        <strong>{{ loading ? 'Memuat author…' : 'Belum ada author' }}</strong>
+        <span>
+          {{ loading ? 'Mohon tunggu sebentar.' : 'Tidak ada author yang cocok dengan filter saat ini.' }}
+        </span>
       </div>
     </div>
 
+    <!-- Right column: detail -->
     <div class="stack">
       <div class="panel">
         <div class="panel-header">
@@ -635,7 +665,7 @@ watch([hasBooks, sortBy, sortOrder], () => {
           </div>
         </div>
 
-        <div v-else-if="selectedAuthor" class="detail-card">
+        <div v-else-if="selectedAuthor" class="detail-card" data-testid="author-detail">
           <div class="detail-grid">
             <div class="detail-item">
               <span>Nama</span>
@@ -659,147 +689,182 @@ watch([hasBooks, sortBy, sortOrder], () => {
             </div>
           </div>
 
-          <div class="panel" style="margin-top: 16px; padding: 16px">
-            <div class="panel-header">
-              <div>
-                <h4 class="panel-title">Books by Author</h4>
-                <p class="panel-subtitle">Relasi book yang tersimpan pada author ini.</p>
-              </div>
-            </div>
+          <div class="divider" />
 
-            <ul v-if="selectedAuthor.books.length" class="list-reset mini-list">
-              <li v-for="book in selectedAuthor.books" :key="book.id" class="mini-list-item">
-                <strong>{{ book.title }}</strong>
-                <div class="muted">
-                  {{ book.published_date ? formatDate(book.published_date) : 'Tanggal terbit belum diisi' }}
+          <div class="flex items-center justify-between">
+            <h4 class="panel-title text-[15px]">Books by Author</h4>
+            <span class="badge badge-neutral">{{ selectedAuthor.books.length }} item</span>
+          </div>
+
+          <ul v-if="selectedAuthor.books.length" class="list-reset mini-list mt-3 stagger">
+            <li v-for="book in selectedAuthor.books" :key="book.id" class="mini-list-item">
+              <div class="flex items-start gap-3">
+                <span class="stat-card-icon" style="height: 32px; width: 32px;">
+                  <BookOpen :size="14" :stroke-width="1.75" />
+                </span>
+                <div class="min-w-0">
+                  <strong>{{ book.title }}</strong>
+                  <div class="meta">
+                    {{ book.published_date ? formatDate(book.published_date) : 'Tanggal terbit belum diisi' }}
+                  </div>
                 </div>
-              </li>
-            </ul>
+              </div>
+            </li>
+          </ul>
 
-            <div v-else class="empty-state">Author ini belum memiliki book.</div>
+          <div v-else class="empty-state mt-3">
+            <span class="empty-state-icon">
+              <BookOpen :size="16" :stroke-width="1.75" />
+            </span>
+            <span>Author ini belum memiliki book.</span>
           </div>
         </div>
 
         <div v-else class="empty-state">
-          Belum ada author yang dipilih. Klik tombol Detail pada tabel author.
+          <span class="empty-state-icon">
+            <Eye :size="18" :stroke-width="1.75" />
+          </span>
+          <strong>Belum ada author dipilih</strong>
+          <span>Klik tombol Detail pada tabel author untuk melihat ringkasan lengkap.</span>
         </div>
       </div>
     </div>
   </section>
 
-  <transition name="drawer">
-    <div
-      v-if="formOpen"
-      class="fixed inset-0 z-50 flex justify-end bg-slate-950/40 p-5 backdrop-blur-sm"
-      @click.self="closeForm"
-    >
-      <div class="drawer h-full w-full max-w-[560px] overflow-y-auto">
-        <div class="panel form-panel">
-          <div class="panel-header">
-            <div>
-              <h3 class="panel-title">
-                {{ mode === 'create' ? 'Tambah Author' : 'Edit Author' }}
-              </h3>
-              <p class="panel-subtitle">Isi data author lalu simpan ke database.</p>
-            </div>
-            <button class="button button-ghost" type="button" @click="closeForm">Tutup</button>
-          </div>
+  <!-- Undo toast -->
+  <transition name="modal">
+    <div v-if="undoNotice" class="undo-toast" role="status" aria-live="polite">
+      <div class="undo-toast-content">
+        <div class="undo-toast-copy">
+          <strong>Author dihapus sementara</strong>
+          <p>
+            <span>{{ undoNotice.label }}</span> bisa dipulihkan dalam
+            <span>{{ undoNotice.secondsLeft }}s</span>.
+          </p>
+        </div>
+        <button class="button button-secondary button-sm" type="button" data-testid="undo-delete" @click="undoDelete">
+          Undo
+        </button>
+      </div>
+      <div class="undo-toast-progress">
+        <div class="undo-toast-progress-bar" :style="{ width: `${undoNotice.progressPercent}%` }" />
+      </div>
+    </div>
+  </transition>
 
-          <form class="form-grid" @submit.prevent="submitForm">
+  <!-- Drawer Form -->
+  <transition name="drawer">
+    <div v-if="formOpen" class="scrim" data-testid="author-form-scrim" @click.self="closeForm">
+      <aside class="drawer-shell" role="dialog" aria-modal="true">
+        <div class="drawer-head">
+          <div>
+            <h3 class="panel-title">
+              {{ mode === 'create' ? 'Tambah Author' : 'Edit Author' }}
+            </h3>
+            <p class="panel-subtitle">Isi data author lalu simpan ke database.</p>
+          </div>
+          <button class="button button-ghost button-icon" type="button" aria-label="Tutup" data-testid="author-form-close" @click="closeForm">
+            <X :size="16" :stroke-width="2" />
+          </button>
+        </div>
+
+        <div class="drawer-body">
+          <form class="form-grid" novalidate @submit.prevent="submitForm">
             <div class="field">
               <label for="author-name">Nama</label>
-              <input id="author-name" v-model="form.name" class="input" type="text" required />
+              <input id="author-name" v-model="form.name" class="input" type="text" data-testid="form-author-name" />
               <div v-if="fieldErrors.name?.length" class="error-text">
+                <AlertTriangle :size="12" :stroke-width="2" />
                 {{ fieldErrors.name[0] }}
               </div>
             </div>
 
             <div class="field">
               <label for="author-nationality">Nationality</label>
-              <input
-                id="author-nationality"
-                v-model="form.nationality"
-                class="input"
-                type="text"
-                required
-              />
+              <input id="author-nationality" v-model="form.nationality" class="input" type="text" data-testid="form-author-nationality" />
               <div v-if="fieldErrors.nationality?.length" class="error-text">
+                <AlertTriangle :size="12" :stroke-width="2" />
                 {{ fieldErrors.nationality[0] }}
               </div>
             </div>
 
             <div class="field">
               <label for="author-birth-date">Tanggal lahir</label>
-              <input
-                id="author-birth-date"
-                v-model="form.birth_date"
-                class="input"
-                type="date"
-                required
-              />
+              <input id="author-birth-date" v-model="form.birth_date" class="input" type="date" data-testid="form-author-birth" />
               <div v-if="fieldErrors.birth_date?.length" class="error-text">
+                <AlertTriangle :size="12" :stroke-width="2" />
                 {{ fieldErrors.birth_date[0] }}
               </div>
             </div>
 
             <div class="field field-full">
               <label for="author-bio">Bio</label>
-              <textarea id="author-bio" v-model="form.bio" class="textarea" required />
-              <div v-if="fieldErrors.bio?.length" class="error-text">{{ fieldErrors.bio[0] }}</div>
+              <textarea id="author-bio" v-model="form.bio" class="textarea" data-testid="form-author-bio" />
+              <div v-if="fieldErrors.bio?.length" class="error-text">
+                <AlertTriangle :size="12" :stroke-width="2" />
+                {{ fieldErrors.bio[0] }}
+              </div>
             </div>
 
             <div class="field field-full">
-              <div class="actions">
-                <button class="button button-primary" type="submit" :disabled="formSubmitting">
-                  {{ formSubmitting ? 'Menyimpan...' : mode === 'create' ? 'Simpan Author' : 'Update Author' }}
-                </button>
-                <button class="button button-secondary" type="button" @click="closeForm">
+              <div class="actions justify-end">
+                <button class="button button-secondary" type="button" data-testid="form-cancel" @click="closeForm">
                   Batal
+                </button>
+                <button class="button button-primary" type="submit" :disabled="formSubmitting" data-testid="form-submit">
+                  {{ formSubmitting ? 'Menyimpan…' : mode === 'create' ? 'Simpan Author' : 'Update Author' }}
                 </button>
               </div>
             </div>
           </form>
         </div>
-      </div>
+      </aside>
     </div>
   </transition>
 
+  <!-- Delete confirmation -->
   <transition name="modal">
-    <div
-      v-if="deleteDialogOpen"
-      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-5 backdrop-blur-sm"
-      @click.self="closeDeleteDialog"
-    >
-      <div class="modal max-h-full w-full max-w-[520px] overflow-y-auto">
-        <div class="panel form-panel">
-          <div class="panel-header">
-            <div>
-              <h3 class="panel-title">Konfirmasi Hapus</h3>
-              <p class="panel-subtitle">Pastikan data yang dipilih sudah benar sebelum menghapus.</p>
-            </div>
-            <button class="button button-ghost" type="button" @click="closeDeleteDialog" :disabled="deleteSubmitting">
-              Tutup
-            </button>
+    <div v-if="deleteDialogOpen" class="modal-shell" @click.self="closeDeleteDialog">
+      <div class="scrim" />
+      <div class="modal-card" role="alertdialog" aria-modal="true" data-testid="delete-modal">
+        <div class="flex items-start gap-3">
+          <span class="stat-card-icon" style="background: var(--color-danger-50); color: var(--color-danger-500); border-color: var(--color-danger-200);">
+            <Trash2 :size="16" :stroke-width="2" />
+          </span>
+          <div class="min-w-0 flex-1">
+            <h3 class="panel-title">Konfirmasi Hapus</h3>
+            <p class="panel-subtitle mt-1">
+              Anda yakin ingin menghapus author <strong>{{ deleteCandidate?.name }}</strong>?
+              Tindakan ini dapat di-undo dalam 7 detik.
+            </p>
           </div>
+        </div>
 
-          <p class="muted">
-            Anda yakin ingin menghapus author <strong>{{ deleteCandidate?.name }}</strong>? Tindakan ini tidak dapat dibatalkan.
-          </p>
+        <div v-if="deleteDialogError" class="message message-error mt-5">
+          {{ deleteDialogError }}
+        </div>
 
-          <div v-if="deleteDialogError" class="message message-error mt-4">
-            {{ deleteDialogError }}
-          </div>
-
-          <div class="mt-5 flex flex-wrap items-center justify-end gap-2">
-            <button class="button button-secondary" type="button" @click="closeDeleteDialog" :disabled="deleteSubmitting">
-              Batal
-            </button>
-            <button class="button button-danger" type="button" @click="confirmDelete" :disabled="deleteSubmitting">
-              {{ deleteSubmitting ? 'Menghapus...' : 'Hapus' }}
-            </button>
-          </div>
+        <div class="mt-6 flex flex-wrap items-center justify-end gap-2">
+          <button class="button button-secondary" type="button" :disabled="deleteSubmitting" data-testid="delete-cancel" @click="closeDeleteDialog">
+            Batal
+          </button>
+          <button class="button button-danger" type="button" :disabled="deleteSubmitting" data-testid="delete-confirm" @click="confirmDelete">
+            <Trash2 :size="13" :stroke-width="2" />
+            {{ deleteSubmitting ? 'Menghapus…' : 'Hapus Author' }}
+          </button>
         </div>
       </div>
     </div>
   </transition>
 </template>
+
+<style scoped>
+.animate-spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+</style>

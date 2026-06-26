@@ -1,10 +1,30 @@
 <!DOCTYPE html>
-<html lang="">
+<html lang="id">
   <head>
-    <meta charset="UTF-8">
-    <link rel="icon" type="image/png" href="/logo.png">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Books &amp; Authors</title>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0a0b" />
+    <meta name="description" content="Books &amp; Authors — Management Console untuk mengelola katalog author dan book secara profesional." />
+    <title>Books &amp; Authors · Management Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Theme bootstrap: avoid FOUC by setting dark/light class before render
+      (function () {
+        try {
+          var saved = localStorage.getItem('ba-theme');
+          var preferDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = saved || (preferDark ? 'dark' : 'light');
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
