@@ -152,7 +152,7 @@ class ApiWorkflowTest extends TestCase
             ->assertJsonPath('errors.name.0', 'Author dengan nama, tanggal lahir, dan nationality yang sama sudah ada.');
     }
 
-    public function test_author_creation_rejects_duplicate_identity_when_original_is_soft_deleted(): void
+    public function test_author_creation_allows_same_identity_when_original_is_soft_deleted(): void
     {
         $author = Author::query()->create([
             'name' => 'Andrea Hirata',
@@ -170,8 +170,9 @@ class ApiWorkflowTest extends TestCase
             'birth_date' => '1967-10-24',
             'nationality' => 'Indonesia',
         ])
-            ->assertStatus(422)
-            ->assertJsonPath('errors.name.0', 'Data author yang sama sudah ada di sampah. Pulihkan data lama jika diperlukan.');
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Andrea Hirata')
+            ->assertJsonPath('data.slug', 'andrea-hirata-2');
     }
 
     public function test_book_restore_fails_after_seven_second_undo_window_expires(): void
@@ -243,7 +244,7 @@ class ApiWorkflowTest extends TestCase
             ->assertJsonPath('errors.isbn.0', 'ISBN ini sudah digunakan oleh book lain.');
     }
 
-    public function test_book_creation_rejects_duplicate_catalog_entry_when_original_is_soft_deleted(): void
+    public function test_book_creation_allows_same_catalog_entry_when_original_is_soft_deleted(): void
     {
         $author = Author::query()->create([
             'name' => 'Tere Liye',
@@ -273,7 +274,9 @@ class ApiWorkflowTest extends TestCase
             'published_date' => '2016-01-01',
             'page_count' => 320,
         ])
-            ->assertStatus(422)
-            ->assertJsonPath('errors.isbn.0', 'ISBN ini sudah digunakan oleh book yang ada di sampah. Pulihkan data lama jika diperlukan.');
+            ->assertCreated()
+            ->assertJsonPath('data.title', 'Hujan')
+            ->assertJsonPath('data.slug', 'hujan-2')
+            ->assertJsonPath('data.isbn', '9786020332956');
     }
 }

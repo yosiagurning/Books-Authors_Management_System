@@ -51,7 +51,7 @@ class UpdateAuthorRequest extends FormRequest
                 $birthDate = $this->input('birth_date');
                 $nationality = trim((string) $this->input('nationality', ''));
 
-                $duplicate = Author::withTrashed()
+                $duplicate = Author::query()
                     ->whereKeyNot($authorId)
                     ->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])
                     ->whereDate('birth_date', $birthDate)
@@ -64,9 +64,7 @@ class UpdateAuthorRequest extends FormRequest
 
                 $validator->errors()->add(
                     'name',
-                    $duplicate->trashed()
-                        ? 'Data author yang sama sudah ada di sampah. Pulihkan data lama jika diperlukan.'
-                        : 'Author dengan nama, tanggal lahir, dan nationality yang sama sudah ada.'
+                    'Author dengan nama, tanggal lahir, dan nationality yang sama sudah ada.'
                 );
             },
         ];

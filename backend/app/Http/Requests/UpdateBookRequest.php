@@ -54,7 +54,7 @@ class UpdateBookRequest extends FormRequest
                 $authorId = (int) $this->input('author_id');
                 $publishedDate = $this->input('published_date');
 
-                $duplicateIsbn = Book::withTrashed()
+                $duplicateIsbn = Book::query()
                     ->whereKeyNot($bookId)
                     ->where('isbn', $isbn)
                     ->first();
@@ -62,15 +62,13 @@ class UpdateBookRequest extends FormRequest
                 if ($duplicateIsbn) {
                     $validator->errors()->add(
                         'isbn',
-                        $duplicateIsbn->trashed()
-                            ? 'ISBN ini sudah digunakan oleh book yang ada di sampah. Pulihkan data lama jika diperlukan.'
-                            : 'ISBN ini sudah digunakan oleh book lain.'
+                        'ISBN ini sudah digunakan oleh book lain.'
                     );
 
                     return;
                 }
 
-                $duplicateBook = Book::withTrashed()
+                $duplicateBook = Book::query()
                     ->whereKeyNot($bookId)
                     ->where('author_id', $authorId)
                     ->whereRaw('LOWER(title) = ?', [mb_strtolower($title)])
@@ -83,9 +81,7 @@ class UpdateBookRequest extends FormRequest
 
                 $validator->errors()->add(
                     'title',
-                    $duplicateBook->trashed()
-                        ? 'Book dengan author, judul, dan tanggal terbit yang sama sudah ada di sampah.'
-                        : 'Book dengan author, judul, dan tanggal terbit yang sama sudah ada.'
+                    'Book dengan author, judul, dan tanggal terbit yang sama sudah ada.'
                 );
             },
         ];
