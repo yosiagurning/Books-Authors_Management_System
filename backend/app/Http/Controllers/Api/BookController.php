@@ -202,7 +202,7 @@ class BookController extends Controller
         $counter = 2;
 
         while (
-            Book::query()
+            Book::withTrashed()
                 ->when($ignoreId !== null, fn ($query) => $query->whereKeyNot($ignoreId))
                 ->where('slug', $slug)
                 ->exists()

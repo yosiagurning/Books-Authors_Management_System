@@ -215,7 +215,7 @@ class AuthorController extends Controller
         $counter = 2;
 
         while (
-            Author::query()
+            Author::withTrashed()
                 ->when($ignoreId !== null, fn ($query) => $query->whereKeyNot($ignoreId))
                 ->where('slug', $slug)
                 ->exists()

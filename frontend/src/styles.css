@@ -882,9 +882,15 @@
 
   .modal-shell {
     @apply fixed inset-0 z-[60] flex items-center justify-center p-5;
+    isolation: isolate;
+  }
+  .modal-shell > .scrim {
+    z-index: 0;
   }
   .modal-card {
     @apply w-full max-w-[480px] rounded-2xl p-6;
+    position: relative;
+    z-index: 1;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     box-shadow: var(--shadow-lg);
@@ -932,6 +938,11 @@
     border-color: var(--color-danger-200);
   }
   html.dark .message-error { color: var(--color-danger-700); }
+  .message-warning {
+    background: #fffbeb;
+    color: #b45309;
+    border-color: #fde68a;
+  }
   .message-info {
     background: var(--color-accent-soft);
     color: var(--color-accent-500);
@@ -985,6 +996,7 @@
   .toast.is-success::before { background: var(--color-success-700); }
   .toast.is-error::before { background: var(--color-danger-500); }
   .toast.is-info::before { background: var(--color-accent-500); }
+  .toast.is-warning::before { background: #d97706; }
   .toast-icon {
     @apply flex h-7 w-7 items-center justify-center rounded-full;
     background: var(--color-accent-soft);
@@ -992,6 +1004,7 @@
   }
   .toast.is-success .toast-icon { background: var(--color-success-50); color: var(--color-success-700); }
   .toast.is-error .toast-icon { background: var(--color-danger-50); color: var(--color-danger-500); }
+  .toast.is-warning .toast-icon { background: #fffbeb; color: #d97706; }
   .toast-copy strong {
     @apply block text-[13.5px] font-semibold;
     color: var(--color-text-strong);

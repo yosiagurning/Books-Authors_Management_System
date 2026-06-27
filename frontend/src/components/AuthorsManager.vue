@@ -35,6 +35,7 @@ const loading = ref(false)
 const detailLoading = ref(false)
 const formSubmitting = ref(false)
 const error = ref('')
+const duplicateNotice = ref('')
 const list = ref<PaginatedResponse<AuthorListItem> | null>(null)
 const selectedAuthor = ref<AuthorDetail | null>(null)
 const search = ref('')
@@ -89,6 +90,7 @@ function resetForm() {
   form.birth_date = ''
   form.nationality = ''
   fieldErrors.value = {}
+  duplicateNotice.value = ''
   mode.value = 'create'
 }
 
@@ -205,9 +207,22 @@ function validateForm() {
   return true
 }
 
+function findDuplicateMessage(errors: ValidationErrors) {
+  for (const messages of Object.values(errors)) {
+    for (const message of messages) {
+      if (/sudah ada|sudah digunakan/i.test(message)) {
+        return message
+      }
+    }
+  }
+
+  return ''
+}
+
 async function submitForm() {
   formSubmitting.value = true
   fieldErrors.value = {}
+  duplicateNotice.value = ''
 
   if (!validateForm()) {
     formSubmitting.value = false
@@ -243,7 +258,13 @@ async function submitForm() {
   } catch (caughtError) {
     if (caughtError instanceof ApiError) {
       fieldErrors.value = caughtError.errors
-      toast.error('Gagal menyimpan', caughtError.message)
+      const duplicateMessage = findDuplicateMessage(caughtError.errors)
+      if (duplicateMessage) {
+        duplicateNotice.value = duplicateMessage
+        toast.warning('Data duplikat terdeteksi', duplicateMessage, 6500)
+      } else {
+        toast.error('Gagal menyimpan', caughtError.message)
+      }
     } else {
       toast.error('Gagal menyimpan', 'Author gagal disimpan.')
     }
@@ -331,17 +352,18 @@ async function confirmDelete() {
   deleteDialogError.value = ''
   try {
     const authorToDelete = deleteCandidate.value
+    const deletedLabel = authorToDelete.name
     const response = await apiRequest<MutationResponse<UndoableDeletePayload>>(
       `/authors/${authorToDelete.id}`,
       { method: 'DELETE' },
     )
-    if (response.data) startUndoNotice(response.data, authorToDelete.name)
+    closeDeleteDialog()
+    if (response.data) startUndoNotice(response.data, deletedLabel)
     if (selectedAuthor.value?.id === authorToDelete.id) {
       selectedAuthor.value = null
       resetForm()
     }
     await loadAuthors()
-    closeDeleteDialog()
   } catch (caughtError) {
     const msg = caughtError instanceof ApiError ? caughtError.message : 'Author gagal dihapus.'
     deleteDialogError.value = msg
@@ -362,7 +384,8 @@ watch([hasBooks, sortBy, sortOrder], () => scheduleFilters())
 </script>
 
 <template>
-  <section class="columns">
+  <div>
+    <section class="columns">
     <div class="panel" data-testid="authors-panel">
       <div class="panel-header">
         <div>
@@ -750,12 +773,12 @@ watch([hasBooks, sortBy, sortOrder], () => scheduleFilters())
         <div class="undo-toast-progress-bar" :style="{ width: `${undoNotice.progressPercent}%` }" />
       </div>
     </div>
-  </transition>
+    </transition>
 
-  <!-- Drawer Form -->
-  <transition name="drawer">
-    <div v-if="formOpen" class="scrim" data-testid="author-form-scrim" @click.self="closeForm">
-      <aside class="drawer-shell" role="dialog" aria-modal="true">
+    <!-- Drawer Form -->
+    <transition name="drawer">
+      <div v-if="formOpen" class="scrim" data-testid="author-form-scrim" @click.self="closeForm">
+        <aside class="drawer-shell" role="dialog" aria-modal="true">
         <div class="drawer-head">
           <div>
             <h3 class="panel-title">
@@ -769,6 +792,10 @@ watch([hasBooks, sortBy, sortOrder], () => scheduleFilters())
         </div>
 
         <div class="drawer-body">
+          <div v-if="duplicateNotice" class="message message-warning">
+            <AlertTriangle :size="14" :stroke-width="2" />
+            {{ duplicateNotice }}
+          </div>
           <form class="form-grid" novalidate @submit.prevent="submitForm">
             <div class="field">
               <label for="author-name">Nama</label>
@@ -818,15 +845,15 @@ watch([hasBooks, sortBy, sortOrder], () => scheduleFilters())
             </div>
           </form>
         </div>
-      </aside>
-    </div>
-  </transition>
+        </aside>
+      </div>
+    </transition>
 
-  <!-- Delete confirmation -->
-  <transition name="modal">
-    <div v-if="deleteDialogOpen" class="modal-shell" @click.self="closeDeleteDialog">
-      <div class="scrim" />
-      <div class="modal-card" role="alertdialog" aria-modal="true" data-testid="delete-modal">
+    <!-- Delete confirmation -->
+    <transition name="modal">
+      <div v-if="deleteDialogOpen" class="modal-shell" @click.self="closeDeleteDialog">
+        <div class="scrim" />
+        <div class="modal-card" role="alertdialog" aria-modal="true" data-testid="delete-modal">
         <div class="flex items-start gap-3">
           <span class="stat-card-icon" style="background: var(--color-danger-50); color: var(--color-danger-500); border-color: var(--color-danger-200);">
             <Trash2 :size="16" :stroke-width="2" />
@@ -853,9 +880,10 @@ watch([hasBooks, sortBy, sortOrder], () => scheduleFilters())
             {{ deleteSubmitting ? 'Menghapus…' : 'Hapus Author' }}
           </button>
         </div>
+        </div>
       </div>
-    </div>
-  </transition>
+    </transition>
+  </div>
 </template>
 
 <style scoped>

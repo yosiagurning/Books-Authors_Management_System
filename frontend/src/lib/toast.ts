@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
 
-export type ToastVariant = 'success' | 'error' | 'info'
+export type ToastVariant = 'success' | 'error' | 'info' | 'warning'
 
 export interface Toast {
   id: number
@@ -45,5 +45,7 @@ export function useToast() {
       push('error', title, description, duration),
     info: (title: string, description?: string, duration?: number) =>
       push('info', title, description, duration),
+    warning: (title: string, description?: string, duration?: number) =>
+      push('warning', title, description, duration),
   }
 }

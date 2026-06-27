@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { useToast } from '@/lib/toast'
-import { CheckCircle2, AlertCircle, Info, X } from 'lucide-vue-next'
+import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-vue-next'
 
 const { toasts, dismiss } = useToast()
 
 const iconFor = (variant: string) => {
   if (variant === 'success') return CheckCircle2
   if (variant === 'error') return AlertCircle
+  if (variant === 'warning') return AlertTriangle
   return Info
 }
 </script>
