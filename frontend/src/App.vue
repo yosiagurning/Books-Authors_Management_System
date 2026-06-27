@@ -9,7 +9,6 @@ import {
   X,
   Sun,
   Moon,
-  Sparkles,
 } from 'lucide-vue-next'
 import { useTheme } from '@/lib/theme'
 import ToastHost from '@/components/ToastHost.vue'
@@ -196,12 +195,6 @@ function closeMobile() {
           <p>{{ currentDescription }}</p>
         </div>
 
-        <div class="hero-actions hidden lg:flex">
-          <span class="badge badge-neutral">
-            <Sparkles :size="12" :stroke-width="2" />
-            Management Console v2
-          </span>
-        </div>
       </header>
 
       <RouterView v-slot="{ Component }">
