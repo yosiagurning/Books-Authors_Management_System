@@ -179,3 +179,4 @@ Seeder backend akan menambahkan beberapa data author dan book contoh, termasuk:
 
 Tujuannya agar reviewer bisa langsung mencoba dashboard, list, detail, dan relasi data tanpa setup manual tambahan.
 
+LINK Database : <https://alsscervtmmhmvgeaube.supabase.co>
